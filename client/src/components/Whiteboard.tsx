@@ -7,303 +7,292 @@ type Tool = 'select' | 'pencil' | 'rect' | 'circle' | 'line' | 'text' | 'eraser'
 
 const Whiteboard: React.FC = () => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
-    const [canvas, setCanvas] = useState<Canvas | null>(null);
-    const [activeTool, setActiveTool] = useState<Tool>('pencil');
-    const [strokeColor, setStrokeColor] = useState('#000000');
-    const [fillColor, setFillColor] = useState('transparent');
-    const [brushSize, setBrushSize] = useState(5);
+    const [fabricCanvas, setFabricCanvas] = useState<Canvas | null>(null);
+    const [tool, setTool] = useState<Tool>('pencil');
+    const [stroke, setStroke] = useState('#000000');
+    const [fill, setFill] = useState('transparent');
+    const [width, setWidth] = useState(5);
 
-    const activeToolRef = useRef<Tool>('pencil');
-    const strokeColorRef = useRef('#000000');
-    const fillColorRef = useRef('transparent');
-    const brushSizeRef = useRef(5);
-    const isUndoing = useRef(false);
+    const toolRef = useRef<Tool>('pencil');
+    const strokeRef = useRef('#000000');
+    const fillRef = useRef('transparent');
+    const widthRef = useRef(5);
+    const undoing = useRef(false);
 
-    const isDrawingShape = useRef(false);
-    const startPos = useRef<{ x: number, y: number } | null>(null);
-    const activeShape = useRef<FabricObject | null>(null);
+    const drawing = useRef(false);
+    const start = useRef<{ x: number, y: number } | null>(null);
+    const currentShape = useRef<FabricObject | null>(null);
 
-    const [history, setHistory] = useState<string[]>([]);
-    const [historyIndex, setHistoryIndex] = useState(-1);
+    const [stack, setStack] = useState<string[]>([]);
+    const [ptr, setPtr] = useState(-1);
 
     useEffect(() => {
-        activeToolRef.current = activeTool;
-        strokeColorRef.current = strokeColor;
-        fillColorRef.current = fillColor;
-        brushSizeRef.current = brushSize;
+        toolRef.current = tool;
+        strokeRef.current = stroke;
+        fillRef.current = fill;
+        widthRef.current = width;
 
-        if (canvas) {
-            canvas.isDrawingMode = activeTool === 'pencil';
-            canvas.selection = activeTool === 'select';
-            canvas.defaultCursor = activeTool === 'text' ? 'text' : 'default';
+        if (fabricCanvas) {
+            fabricCanvas.isDrawingMode = tool === 'pencil';
+            fabricCanvas.selection = tool === 'select';
+            fabricCanvas.defaultCursor = tool === 'text' ? 'text' : 'default';
 
-            if (canvas.freeDrawingBrush) {
-                canvas.freeDrawingBrush.color = strokeColor;
-                canvas.freeDrawingBrush.width = brushSize;
+            if (fabricCanvas.freeDrawingBrush) {
+                fabricCanvas.freeDrawingBrush.color = stroke;
+                fabricCanvas.freeDrawingBrush.width = width;
             }
 
-            canvas.getObjects().forEach((obj) => {
-                obj.selectable = activeTool === 'select' || activeTool === 'eraser';
-                obj.evented = activeTool === 'select' || activeTool === 'eraser';
+            fabricCanvas.getObjects().forEach((obj) => {
+                obj.selectable = tool === 'select' || tool === 'eraser';
+                obj.evented = tool === 'select' || tool === 'eraser';
             });
-            canvas.requestRenderAll();
+            fabricCanvas.requestRenderAll();
         }
-    }, [activeTool, strokeColor, fillColor, brushSize, canvas]);
+    }, [tool, stroke, fill, width, fabricCanvas]);
 
     useEffect(() => {
         if (!canvasRef.current) return;
 
-        const newCanvas = new Canvas(canvasRef.current, {
+        const cvs = new Canvas(canvasRef.current, {
             width: 800,
             height: 600,
             backgroundColor: 'white',
             selection: false,
         });
 
-        setCanvas(newCanvas);
+        setFabricCanvas(cvs);
         socket.emit('join-room', 'default-room');
 
-        const brush = new PencilBrush(newCanvas);
-        brush.color = strokeColorRef.current;
-        brush.width = brushSizeRef.current;
-        newCanvas.freeDrawingBrush = brush;
+        const brush = new PencilBrush(cvs);
+        brush.color = strokeRef.current;
+        brush.width = widthRef.current;
+        cvs.freeDrawingBrush = brush;
 
-        const initialState = JSON.stringify(newCanvas);
-        setHistory([initialState]);
-        setHistoryIndex(0);
+        const init = JSON.stringify(cvs);
+        setStack([init]);
+        setPtr(0);
 
-        newCanvas.on('path:created', (e: any) => {
-            if (activeToolRef.current === 'pencil') {
-                handleObjectAdded(e.path, newCanvas);
+        cvs.on('path:created', (e: any) => {
+            if (toolRef.current === 'pencil') {
+                syncObject(e.path, cvs);
             }
         });
 
-        newCanvas.on('object:added', (e: any) => {
-            // This triggers for ALL objects, including those added via socket.
-            // We need to distinguish between user actions and socket updates.
-            // For now, 'path:created' is good for pencil.
-            // For shapes, we'll emit manually after creation.
+        cvs.on('object:modified', () => {
+            pushState(cvs);
         });
 
-        newCanvas.on('object:modified', () => {
-            saveHistory(newCanvas);
-            // TODO: Emit modification event if we want real-time editing of existing objects
-        });
+        cvs.on('mouse:down', (o: any) => onMouseDown(o, cvs));
+        cvs.on('mouse:move', (o: any) => onMouseMove(o, cvs));
+        cvs.on('mouse:up', (o: any) => onMouseUp(o, cvs));
 
-        newCanvas.on('mouse:down', (o: any) => handleMouseDown(o, newCanvas));
-        newCanvas.on('mouse:move', (o: any) => handleMouseMove(o, newCanvas));
-        newCanvas.on('mouse:up', (o: any) => handleMouseUp(o, newCanvas));
-
-        // Socket Listeners
         socket.on('draw', (data: any) => {
             util.enlivenObjects([data.object]).then((objects: any[]) => {
                 objects.forEach((o) => {
-                    newCanvas.add(o);
+                    cvs.add(o);
                 });
-                newCanvas.renderAll();
-                saveHistory(newCanvas);
+                cvs.renderAll();
+                pushState(cvs);
             });
         });
 
         socket.on('clear', () => {
-            newCanvas.clear();
-            newCanvas.backgroundColor = 'white';
-            newCanvas.renderAll();
-            saveHistory(newCanvas);
+            cvs.clear();
+            cvs.backgroundColor = 'white';
+            cvs.renderAll();
+            pushState(cvs);
         });
 
         return () => {
-            newCanvas.dispose();
+            cvs.dispose();
             socket.off('draw');
             socket.off('clear');
         };
     }, []);
 
+    const onMouseDown = (o: any, cvs: Canvas) => {
+        const p = cvs.getPointer(o.e);
+        start.current = { x: p.x, y: p.y };
+        const t = toolRef.current;
 
-    const handleMouseDown = (o: any, cvs: Canvas) => {
-        const pointer = cvs.getPointer(o.e);
-        startPos.current = { x: pointer.x, y: pointer.y };
-        const tool = activeToolRef.current;
+        if (t === 'select') return;
 
-        if (tool === 'select') return;
-
-        if (tool === 'eraser') {
+        if (t === 'eraser') {
             if (o.target) {
                 cvs.remove(o.target);
-                saveHistory(cvs);
-                // TODO: Emit delete event
+                pushState(cvs);
             }
             return;
         }
 
-        if (tool === 'text') {
-            const text = new IText('Type here', {
-                left: pointer.x,
-                top: pointer.y,
-                fill: strokeColorRef.current,
-                fontSize: brushSizeRef.current * 4,
+        if (t === 'text') {
+            const txt = new IText('Type here', {
+                left: p.x,
+                top: p.y,
+                fill: strokeRef.current,
+                fontSize: widthRef.current * 4,
             });
-            cvs.add(text);
-            cvs.setActiveObject(text);
-            text.enterEditing();
-            handleObjectAdded(text, cvs);
-            setActiveTool('select');
+            cvs.add(txt);
+            cvs.setActiveObject(txt);
+            txt.enterEditing();
+            syncObject(txt, cvs);
+            setTool('select');
             return;
         }
 
-        if (['rect', 'circle', 'line'].includes(tool)) {
-            isDrawingShape.current = true;
-            let shape: FabricObject | null = null;
-            const stroke = strokeColorRef.current;
-            const fill = fillColorRef.current === 'transparent' ? '' : fillColorRef.current;
-            const size = brushSizeRef.current;
+        if (['rect', 'circle', 'line'].includes(t)) {
+            drawing.current = true;
+            let s: FabricObject | null = null;
+            const st = strokeRef.current;
+            const fl = fillRef.current === 'transparent' ? '' : fillRef.current;
+            const w = widthRef.current;
 
-            if (tool === 'rect') {
-                shape = new Rect({
-                    left: pointer.x,
-                    top: pointer.y,
+            if (t === 'rect') {
+                s = new Rect({
+                    left: p.x,
+                    top: p.y,
                     width: 0,
                     height: 0,
-                    fill: fill,
-                    stroke: stroke,
-                    strokeWidth: size,
+                    fill: fl,
+                    stroke: st,
+                    strokeWidth: w,
                     transparentCorners: false
                 });
-            } else if (tool === 'circle') {
-                shape = new Circle({
-                    left: pointer.x,
-                    top: pointer.y,
+            } else if (t === 'circle') {
+                s = new Circle({
+                    left: p.x,
+                    top: p.y,
                     radius: 0,
-                    fill: fill,
-                    stroke: stroke,
-                    strokeWidth: size,
+                    fill: fl,
+                    stroke: st,
+                    strokeWidth: w,
                     originX: 'center',
                     originY: 'center'
                 });
-            } else if (tool === 'line') {
-                shape = new Line([pointer.x, pointer.y, pointer.x, pointer.y], {
-                    stroke: stroke,
-                    strokeWidth: size,
+            } else if (t === 'line') {
+                s = new Line([p.x, p.y, p.x, p.y], {
+                    stroke: st,
+                    strokeWidth: w,
                 });
             }
 
-            if (shape) {
-                activeShape.current = shape;
-                cvs.add(shape);
+            if (s) {
+                currentShape.current = s;
+                cvs.add(s);
             }
         }
     };
 
-    const handleMouseMove = (o: any, cvs: Canvas) => {
-        if (!isDrawingShape.current || !activeShape.current || !startPos.current) return;
-        const pointer = cvs.getPointer(o.e);
-        const tool = activeToolRef.current;
+    const onMouseMove = (o: any, cvs: Canvas) => {
+        if (!drawing.current || !currentShape.current || !start.current) return;
+        const p = cvs.getPointer(o.e);
+        const t = toolRef.current;
 
-        if (tool === 'rect') {
-            const rect = activeShape.current as Rect;
-            rect.set({
-                width: Math.abs(pointer.x - startPos.current.x),
-                height: Math.abs(pointer.y - startPos.current.y),
-                left: Math.min(pointer.x, startPos.current.x),
-                top: Math.min(pointer.y, startPos.current.y)
+        if (t === 'rect') {
+            const r = currentShape.current as Rect;
+            r.set({
+                width: Math.abs(p.x - start.current.x),
+                height: Math.abs(p.y - start.current.y),
+                left: Math.min(p.x, start.current.x),
+                top: Math.min(p.y, start.current.y)
             });
-        } else if (tool === 'circle') {
-            const circle = activeShape.current as Circle;
-            const radius = Math.sqrt(Math.pow(pointer.x - startPos.current.x, 2) + Math.pow(pointer.y - startPos.current.y, 2)) / 2;
-            circle.set({ radius: radius });
-        } else if (tool === 'line') {
-            const line = activeShape.current as Line;
-            line.set({ x2: pointer.x, y2: pointer.y });
+        } else if (t === 'circle') {
+            const c = currentShape.current as Circle;
+            const rad = Math.sqrt(Math.pow(p.x - start.current.x, 2) + Math.pow(p.y - start.current.y, 2)) / 2;
+            c.set({ radius: rad });
+        } else if (t === 'line') {
+            const l = currentShape.current as Line;
+            l.set({ x2: p.x, y2: p.y });
         }
 
         cvs.renderAll();
     };
 
-    const handleMouseUp = (o: any, cvs: Canvas) => {
-        if (isDrawingShape.current && activeShape.current) {
-            handleObjectAdded(activeShape.current, cvs);
-            activeShape.current = null;
-            isDrawingShape.current = false;
+    const onMouseUp = (o: any, cvs: Canvas) => {
+        if (drawing.current && currentShape.current) {
+            syncObject(currentShape.current, cvs);
+            currentShape.current = null;
+            drawing.current = false;
         }
     };
 
-    const handleObjectAdded = (obj: FabricObject, cvs: Canvas) => {
+    const syncObject = (obj: FabricObject, cvs: Canvas) => {
         socket.emit('draw', {
             roomId: 'default-room',
             object: obj.toObject(),
         });
-        saveHistory(cvs);
+        pushState(cvs);
     };
 
-    const saveHistory = (c: Canvas) => {
-        if (isUndoing.current) return;
+    const pushState = (c: Canvas) => {
+        if (undoing.current) return;
         const json = JSON.stringify(c);
-        setHistory((prev) => {
-            const newHistory = prev.slice(0, historyIndex + 1);
-            newHistory.push(json);
-            return newHistory;
+        setStack((prev) => {
+            const next = prev.slice(0, ptr + 1);
+            next.push(json);
+            return next;
         });
-        setHistoryIndex((prev) => prev + 1);
+        setPtr((prev) => prev + 1);
     };
 
     const undo = () => {
-        if (historyIndex > 0 && canvas) {
-            isUndoing.current = true;
-            const newIndex = historyIndex - 1;
-            setHistoryIndex(newIndex);
-            canvas.loadFromJSON(history[newIndex]).then(() => {
-                canvas.renderAll();
-                isUndoing.current = false;
+        if (ptr > 0 && fabricCanvas) {
+            undoing.current = true;
+            const nextPtr = ptr - 1;
+            setPtr(nextPtr);
+            fabricCanvas.loadFromJSON(stack[nextPtr]).then(() => {
+                fabricCanvas.renderAll();
+                undoing.current = false;
 
-                canvas.isDrawingMode = activeToolRef.current === 'pencil';
-                canvas.selection = activeToolRef.current === 'select';
+                fabricCanvas.isDrawingMode = toolRef.current === 'pencil';
+                fabricCanvas.selection = toolRef.current === 'select';
 
-                if (canvas.freeDrawingBrush) {
-                    canvas.freeDrawingBrush.color = strokeColorRef.current;
-                    canvas.freeDrawingBrush.width = brushSizeRef.current;
+                if (fabricCanvas.freeDrawingBrush) {
+                    fabricCanvas.freeDrawingBrush.color = strokeRef.current;
+                    fabricCanvas.freeDrawingBrush.width = widthRef.current;
                 }
             });
         }
     };
 
     const redo = () => {
-        if (historyIndex < history.length - 1 && canvas) {
-            isUndoing.current = true;
-            const newIndex = historyIndex + 1;
-            setHistoryIndex(newIndex);
-            canvas.loadFromJSON(history[newIndex]).then(() => {
-                canvas.renderAll();
-                isUndoing.current = false;
+        if (ptr < stack.length - 1 && fabricCanvas) {
+            undoing.current = true;
+            const nextPtr = ptr + 1;
+            setPtr(nextPtr);
+            fabricCanvas.loadFromJSON(stack[nextPtr]).then(() => {
+                fabricCanvas.renderAll();
+                undoing.current = false;
 
-                canvas.isDrawingMode = activeToolRef.current === 'pencil';
-                canvas.selection = activeToolRef.current === 'select';
+                fabricCanvas.isDrawingMode = toolRef.current === 'pencil';
+                fabricCanvas.selection = toolRef.current === 'select';
 
-                if (canvas.freeDrawingBrush) {
-                    canvas.freeDrawingBrush.color = strokeColorRef.current;
-                    canvas.freeDrawingBrush.width = brushSizeRef.current;
+                if (fabricCanvas.freeDrawingBrush) {
+                    fabricCanvas.freeDrawingBrush.color = strokeRef.current;
+                    fabricCanvas.freeDrawingBrush.width = widthRef.current;
                 }
             });
         }
     };
 
-    const saveImage = () => {
-        if (!canvas) return;
-        const dataURL = canvas.toDataURL({ format: 'png', multiplier: 1 });
-        const link = document.createElement('a');
-        link.href = dataURL;
-        link.download = 'whiteboard.png';
-        link.click();
+    const exportImg = () => {
+        if (!fabricCanvas) return;
+        const url = fabricCanvas.toDataURL({ format: 'png', multiplier: 1 });
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'whiteboard.png';
+        a.click();
     };
 
-    const savePDF = () => {
-        if (!canvas) return;
-        const imgData = canvas.toDataURL({ format: 'png', multiplier: 1 });
+    const exportPdf = () => {
+        if (!fabricCanvas) return;
+        const data = fabricCanvas.toDataURL({ format: 'png', multiplier: 1 });
         const pdf = new jsPDF();
-        pdf.addImage(imgData, 'PNG', 0, 0, 210, 150);
+        pdf.addImage(data, 'PNG', 0, 0, 210, 150);
         pdf.save('whiteboard.pdf');
     };
 
-    const clearCanvas = () => {
+    const wipe = () => {
         socket.emit('clear', 'default-room');
     };
 
@@ -312,18 +301,18 @@ const Whiteboard: React.FC = () => {
             <div className="glass-panel p-3 mb-3 d-flex gap-3 align-items-center flex-wrap justify-content-center shadow-sm" style={{ borderRadius: '15px', zIndex: 10 }}>
 
                 <div className="btn-group" role="group">
-                    <button className={`btn ${activeTool === 'select' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setActiveTool('select')} title="Select">Select</button>
-                    <button className={`btn ${activeTool === 'pencil' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setActiveTool('pencil')} title="Pencil">✏️</button>
-                    <button className={`btn ${activeTool === 'eraser' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setActiveTool('eraser')} title="Eraser">🧹</button>
-                    <button className={`btn ${activeTool === 'text' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setActiveTool('text')} title="Text">T</button>
+                    <button className={`btn ${tool === 'select' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setTool('select')} title="Select">Select</button>
+                    <button className={`btn ${tool === 'pencil' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setTool('pencil')} title="Pencil">✏️</button>
+                    <button className={`btn ${tool === 'eraser' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setTool('eraser')} title="Eraser">🧹</button>
+                    <button className={`btn ${tool === 'text' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setTool('text')} title="Text">T</button>
                 </div>
 
                 <div className="vr"></div>
 
                 <div className="btn-group" role="group">
-                    <button className={`btn ${activeTool === 'rect' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setActiveTool('rect')} title="Rectangle">⬜</button>
-                    <button className={`btn ${activeTool === 'circle' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setActiveTool('circle')} title="Circle">⚪</button>
-                    <button className={`btn ${activeTool === 'line' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setActiveTool('line')} title="Line">➖</button>
+                    <button className={`btn ${tool === 'rect' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setTool('rect')} title="Rectangle">⬜</button>
+                    <button className={`btn ${tool === 'circle' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setTool('circle')} title="Circle">⚪</button>
+                    <button className={`btn ${tool === 'line' ? 'btn-primary' : 'btn-outline-primary'}`} onClick={() => setTool('line')} title="Line">➖</button>
                 </div>
 
                 <div className="vr"></div>
@@ -331,34 +320,34 @@ const Whiteboard: React.FC = () => {
                 <div className="d-flex align-items-center gap-2">
                     <div className="d-flex flex-column align-items-center">
                         <small style={{ fontSize: '0.7rem' }}>Stroke</small>
-                        <input type="color" value={strokeColor} onChange={(e) => setStrokeColor(e.target.value)} className="form-control form-control-color form-control-sm" title="Stroke Color" />
+                        <input type="color" value={stroke} onChange={(e) => setStroke(e.target.value)} className="form-control form-control-color form-control-sm" title="Stroke Color" />
                     </div>
                     <div className="d-flex flex-column align-items-center">
                         <small style={{ fontSize: '0.7rem' }}>Fill</small>
                         <div className="d-flex align-items-center gap-1">
-                            <input type="checkbox" checked={fillColor !== 'transparent'} onChange={(e) => setFillColor(e.target.checked ? '#ffffff' : 'transparent')} title="Toggle Fill" />
-                            {fillColor !== 'transparent' && (
-                                <input type="color" value={fillColor} onChange={(e) => setFillColor(e.target.value)} className="form-control form-control-color form-control-sm" title="Fill Color" />
+                            <input type="checkbox" checked={fill !== 'transparent'} onChange={(e) => setFill(e.target.checked ? '#ffffff' : 'transparent')} title="Toggle Fill" />
+                            {fill !== 'transparent' && (
+                                <input type="color" value={fill} onChange={(e) => setFill(e.target.value)} className="form-control form-control-color form-control-sm" title="Fill Color" />
                             )}
                         </div>
                     </div>
                     <div className="d-flex flex-column align-items-center" style={{ width: '100px' }}>
-                        <small style={{ fontSize: '0.7rem' }}>Size: {brushSize}</small>
-                        <input type="range" min="1" max="50" value={brushSize} onChange={(e) => setBrushSize(parseInt(e.target.value))} className="form-range" />
+                        <small style={{ fontSize: '0.7rem' }}>Size: {width}</small>
+                        <input type="range" min="1" max="50" value={width} onChange={(e) => setWidth(parseInt(e.target.value))} className="form-range" />
                     </div>
                 </div>
 
                 <div className="vr"></div>
 
                 <div className="btn-group">
-                    <button className="btn btn-outline-secondary" onClick={undo} disabled={historyIndex <= 0}>↩️</button>
-                    <button className="btn btn-outline-secondary" onClick={redo} disabled={historyIndex >= history.length - 1}>↪️</button>
+                    <button className="btn btn-outline-secondary" onClick={undo} disabled={ptr <= 0}>↩️</button>
+                    <button className="btn btn-outline-secondary" onClick={redo} disabled={ptr >= stack.length - 1}>↪️</button>
                 </div>
                 <div className="btn-group">
-                    <button className="btn btn-outline-success" onClick={saveImage}>💾 PNG</button>
-                    <button className="btn btn-outline-success" onClick={savePDF}>📄 PDF</button>
+                    <button className="btn btn-outline-success" onClick={exportImg}>💾 PNG</button>
+                    <button className="btn btn-outline-success" onClick={exportPdf}>📄 PDF</button>
                 </div>
-                <button className="btn btn-outline-danger" onClick={clearCanvas}>🗑️ Clear</button>
+                <button className="btn btn-outline-danger" onClick={wipe}>🗑️ Clear</button>
             </div>
 
             <div className="whiteboard-container shadow-lg position-relative bg-white" style={{ borderRadius: '8px', overflow: 'hidden' }}>

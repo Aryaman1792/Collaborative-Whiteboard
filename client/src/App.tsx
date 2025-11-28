@@ -7,21 +7,21 @@ import keycloak from './services/auth';
 import { socket } from './services/socket';
 
 function App() {
-    const [authenticated, setAuthenticated] = useState(false);
-    const [username, setUsername] = useState('');
+    const [isLoggedIn, setIsLoggedIn] = useState(false);
+    const [user, setUser] = useState('');
     const [error, setError] = useState<string | null>(null);
-    const initialized = useRef(false);
+    const init = useRef(false);
 
     useEffect(() => {
-        if (initialized.current) return;
-        initialized.current = true;
+        if (init.current) return;
+        init.current = true;
 
         keycloak.init({ onLoad: 'login-required' }).then((auth: boolean) => {
-            setAuthenticated(auth);
+            setIsLoggedIn(auth);
             if (auth) {
                 const uniqueSuffix = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
                 const baseName = keycloak.tokenParsed?.preferred_username || 'Anonymous';
-                setUsername(`${baseName}#${uniqueSuffix}`);
+                setUser(`${baseName}#${uniqueSuffix}`);
                 socket.emit('join-room', 'default-room');
             }
         }).catch((err) => {
@@ -30,7 +30,7 @@ function App() {
         });
     }, []);
 
-    const handleLogout = () => {
+    const logout = () => {
         keycloak.logout();
     };
 
@@ -45,7 +45,7 @@ function App() {
         );
     }
 
-    if (!authenticated) {
+    if (!isLoggedIn) {
         return (
             <div className="d-flex justify-content-center align-items-center vh-100">
                 <div className="glass-panel p-5 text-center">
@@ -62,8 +62,8 @@ function App() {
                 <h1>Collaborative Whiteboard</h1>
                 <div className="d-flex align-items-center gap-3">
                     <InviteModal />
-                    <span>Welcome, {username}</span>
-                    <button className="btn glass-button" onClick={handleLogout}>Logout</button>
+                    <span>Welcome, {user}</span>
+                    <button className="btn glass-button" onClick={logout}>Logout</button>
                 </div>
             </div>
 
@@ -72,7 +72,7 @@ function App() {
                     <Whiteboard />
                 </div>
                 <div className="col-md-4">
-                    <Chat username={username} />
+                    <Chat username={user} />
                 </div>
             </div>
         </div>
