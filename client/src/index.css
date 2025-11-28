@@ -1,0 +1,53 @@
+@import 'bootstrap/dist/css/bootstrap.min.css';
+
+body {
+  background: linear-gradient(135deg, #2c3e50 0%, #4ca1af 100%);
+  min-height: 100vh;
+  font-family: 'Inter', sans-serif;
+  color: #fff;
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-radius: 15px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+}
+
+.glass-button {
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  transition: all 0.3s ease;
+}
+
+.glass-button:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: translateY(-2px);
+}
+
+.whiteboard-container {
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.chat-container {
+  height: 400px;
+  overflow-y: auto;
+}
+
+.chat-message {
+  background: rgba(0, 0, 0, 0.2);
+  padding: 8px 12px;
+  border-radius: 12px;
+  margin-bottom: 8px;
+  max-width: 80%;
+}
+
+.chat-message.mine {
+  background: rgba(255, 255, 255, 0.2);
+  margin-left: auto;
+}
