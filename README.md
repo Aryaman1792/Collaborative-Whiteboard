@@ -1,65 +1,103 @@
 # Collaborative Whiteboard
 
-A real-time collaborative whiteboard application built with React, TypeScript, and Fabric.js. This project allows multiple users to draw, chat, and collaborate on a shared canvas in real-time.
+A real-time collaborative whiteboard built with React and TypeScript. Draw together, chat in real-time, and authenticate securely with Keycloak.
 
 ## Features
 
-- **Real-time Collaboration**: Draw and interact with others instantly using Socket.IO.
-- **Advanced Drawing Tools**:
-  - Pencil (Freehand drawing)
-  - Shapes (Rectangle, Circle, Line)
-  - Text Tool
-  - Eraser
-- **Customization**:
-  - Adjustable stroke color and width
-  - Fill color support for shapes
-- **History Management**: Robust Undo/Redo functionality.
-- **Export Options**: Save your work as PNG or PDF.
-- **Live Chat**: Integrated chat feature with unique user identification.
-- **Modern UI**: Sleek "Glassmorphism" design using Bootstrap 5.
+- Real-time drawing with multiple users
+- Drawing tools: Pencil, shapes (rectangle, circle, line), text, eraser
+- Color picker and stroke width controls
+- Undo/redo, clear canvas
+- Export as PNG or PDF
+- Live chat
+- Glassmorphism UI with Bootstrap 5
 
 ## Tech Stack
 
-- **Frontend**: React, TypeScript, Fabric.js, Bootstrap 5
-- **Backend**: Node.js, Express, Socket.IO
-- **Authentication**: Keycloak Integration
-- **Build Tool**: Vite
+React, TypeScript, Fabric.js, Bootstrap 5, Node.js, Socket.IO, Keycloak, PostgreSQL
 
-## Getting Started
+## Prerequisites
 
-### Prerequisites
+You'll need Node.js (v14+), npm, Docker, and Git installed.
 
-- Node.js (v14 or higher)
-- Keycloak server running locally
+## Quick Start
 
-### Installation
+### 1. Clone and navigate
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/Aryaman1792/Collaborative-Whiteboard.git
-   cd Collaborative-Whiteboard
-   ```
+```bash
+git clone https://github.com/Aryaman1792/Collaborative-Whiteboard.git
+cd Collaborative-Whiteboard
+```
 
-2. **Install Dependencies**
-   ```bash
-   # Install server dependencies
-   cd server
-   npm install
+### 2. Start Keycloak (wait ~60 seconds after this)
 
-   # Install client dependencies
-   cd ../client
-   npm install
-   ```
+```bash
+docker-compose up -d
+```
 
-3. **Run the Application**
-   ```bash
-   # Start the server (from server directory)
-   npm start
+### 3. Configure Keycloak
 
-   # Start the client (from client directory)
-   npm run dev
-   ```
+- Go to http://localhost:8080
+- Login: `admin` / `admin`
+- Click "Create Realm" in the top-left dropdown
+- Import the `realm-export.json` file from the project root
 
-## License
+### 4. Install dependencies
 
-This project is licensed under the MIT License.
+```bash
+cd server && npm install
+cd ../client && npm install
+```
+
+### 5. Run the app (use two terminals)
+
+**Terminal 1 (Backend):**
+```bash
+cd server
+npm start
+```
+
+**Terminal 2 (Frontend):**
+```bash
+cd client
+npm run dev
+```
+
+### 6. Login and use
+
+- Go to http://localhost:5173
+- Login with: `user` / `password`
+
+## Credentials
+
+**Keycloak Admin:** `admin` / `admin` at http://localhost:8080  
+**App User:** `user` / `password`
+
+## Troubleshooting
+
+**Keycloak won't load?** Wait 2 minutes after starting Docker, then refresh.
+
+**Can't connect?** Make sure all three services are running:
+- Docker: `docker-compose ps`
+- Backend: Should show "Server running on port 3001"
+- Frontend: Vite dev server should be running
+
+**Port conflicts?** Stop whatever's using port 8080, 3001, or 5173.
+
+**Realm import fails?** Create it manually:
+1. Create realm named `whiteboard-realm`
+2. Create client `whiteboard-client` with redirect URI `http://localhost:5173/*`
+3. Create user `user` with password `password` (temporary: OFF)
+
+## Stopping Everything
+
+```bash
+# Ctrl+C in both terminals, then:
+docker-compose down
+```
+
+## Notes
+
+- Drawings aren't saved to a database - they only exist during the session
+- Open multiple browsers to test collaboration
+- Change default passwords for production use
